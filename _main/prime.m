@@ -163,7 +163,7 @@ classdef prime < handle
             inputs.addParameter('fov_fit',[],@isnumeric);
             inputs.addParameter('monochromaticBand',10e-9,@isnumeric);
             inputs.addParameter('psf_ext',[],@isnumeric);
-            inputs.addParameter('flagToeplitz',false,@islogical);
+            inputs.addParameter('flagToeplitz',true,@islogical);
             inputs.addParameter('flagNoiseMethod','autocorrelation',@ischar);
             inputs.addParameter('flagAnisoMethod','oomao',@ischar);
             inputs.addParameter('flagAliasingMethod','PSD',@ischar);

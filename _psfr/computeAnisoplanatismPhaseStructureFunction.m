@@ -38,14 +38,14 @@ end
 
 
 if psfr.flagAniso
+    psfr.atm.wavelength = psfr.src(1).photometry;
     %2\ Get the anisoplanatism phase structure function due to angular and focal anisoplanatism
-    % if psfr.lgs.height~=Inf, it includes focal aniso automatically
-    Dani_l= instantiateAnisoplanatism(psfr,psfr.gs,'rmTT',false);
+    Dani_l= instantiateAnisoplanatism(psfr,psfr.gs);   
     Dani  = squeeze(sum(bsxfun(@times, psfr.Dani_l, reshape(psfr.atm.r0^(-5/3)*[psfr.atm.layer.fractionnalR0],1,1,[])), 3));
     
     if thereisAnisokinetism
     %3\ Get the tip-tilt anisoplanatism phase structure function
-        DaniTT_l  = instantiateAnisoplanatism(psfr,psfr.ttgs,'rmTT',true);
+        DaniTT_l  = instantiateAnisoplanatism(psfr,psfr.ttgs,'isTT',true);
         Dani  = squeeze(Dani+ sum(bsxfun(@times, DaniTT_l, reshape(psfr.atm.r0^(-5/3)*[psfr.atm.layer.fractionnalR0],1,1,[])), 3));
         Dani_l= Dani_l  + DaniTT_l;
     end
@@ -65,9 +65,9 @@ end
 
 function Dani_l = instantiateAnisoplanatism(psfr,gs,varargin)
 inputs = inputParser;
-inputs.addRequired('psfr',@(x) isa(x,'primeKVS'));
+inputs.addRequired('psfr',@(x) isa(x,'prime'));
 inputs.addRequired('gs',@(x) isa(x,'source'));
-inputs.addParameter('rmTT',false,@islogical);
+inputs.addParameter('isTT',false,@islogical);
 inputs.parse(psfr,gs,varargin{:});
 
 
@@ -75,13 +75,14 @@ fprintf('Instantiate the anisoplanatism model...');
 
 %1\ Defining the spatial filters
 D       = psfr.tel.D;
-rmTT = inputs.Results.rmTT;
+npt  = psfr.dk;
+isTT = inputs.Results.isTT;
 if gs.height ~= Inf
     zern   = zernike(2:3,'resolution',npt);
     TT     = zern.modes;
     Hfilter= eye(npt^2) - TT*pinv(TT);
-    Hfilter= Hfilter*psfr.Hdm;
-elseif gs.height == Inf && rmTT
+    Hfilter= Hfilter*psfr.trs.Hdm;
+elseif gs.height == Inf && isTT
     x      = (-1+1/npt:2/npt:1-1/npt);
     [X,Y]  = meshgrid(x,x);
     TT     = [X(:),Y(:)];
@@ -209,8 +210,10 @@ else % Use the native OOMAO routines in phaseStats to calculate the anisoplanati
                 if psfr.flagToeplitz
                     Cani = tools.covMatrix2Map(Cani,psfr.dk,psfr.dk);
                     Cani = tools.interpolateOtf(Cani,psfr.nOtf);
-                end                
-                Dani_l(:,:,l,iSrc) = 2*(diag(Cani) - Cani);
+                    Dani_l(:,:,l,iSrc) = 2*(max(Cani(:)) - Cani);
+                else                
+                    Dani_l(:,:,l,iSrc) = 2*(diag(Cani) - Cani);
+                end
             end
         end
     end
