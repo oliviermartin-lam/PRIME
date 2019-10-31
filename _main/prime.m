@@ -149,10 +149,8 @@ classdef prime < handle
         % --------------------- Flags
         flagToeplitz       = true;
         flagAniso          = false;
-        flagNoiseMethod    = 'autocorrelation';  %'RTF'
-        flagAnisoMethod    = 'oomao';            %'FOURIER','FLICKER'
-        flagAliasingMethod = 'PSD';              %'COV'
-        flagInitPSFR       = false;
+        flagNoiseMethod    = 'autocorrelation';  %'rtf'
+        flagAnisoMethod    = 'oomao';            %'FOURIER','FLICKER'        
     end
     
     methods
@@ -166,7 +164,6 @@ classdef prime < handle
             inputs.addParameter('flagToeplitz',true,@islogical);
             inputs.addParameter('flagNoiseMethod','autocorrelation',@ischar);
             inputs.addParameter('flagAnisoMethod','oomao',@ischar);
-            inputs.addParameter('flagAliasingMethod','PSD',@ischar);
             inputs.parse(trs,varargin{:});
             
             % Grab inputs
@@ -176,7 +173,6 @@ classdef prime < handle
             obj.fov_fit            = inputs.Results.fov_fit;
             obj.flagNoiseMethod    = inputs.Results.flagNoiseMethod;
             obj.flagAnisoMethod    = inputs.Results.flagAnisoMethod;
-            obj.flagAliasingMethod = inputs.Results.flagAliasingMethod;
             obj.psf_ext            = inputs.Results.psf_ext;
             
             if isempty(obj.fov_fit)

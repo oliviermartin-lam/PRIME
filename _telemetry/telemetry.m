@@ -37,12 +37,22 @@ classdef telemetry < handle
         holoop_gain
         holoop_freq ;
         holoop_lat;
+        holoop_wfs;
+        holoop_lag;
+        holoop_servo;
+        holoop_ol;
+        holoop_ctf;
         holoop_rtf;
         holoop_ntf;
         holoop_pn;
         ttloop_gain;
         ttloop_freq;
         ttloop_lat;
+        ttloop_wfs;
+        ttloop_lag;
+        ttloop_servo;
+        ttloop_ol;
+        ttloop_ctf;
         ttloop_rtf;
         ttloop_ntf;
         ttloop_pn
@@ -82,7 +92,7 @@ classdef telemetry < handle
             
             
             if isstruct(aoSys)
-                obj.parm = aoSys;                
+                obj.parm = aoSys;
                 obj = obj.restoreKeckTelemetry(obj.date,obj.path_data,obj.path_calib);
                 obj = obj.restoreNIRC2Image(obj.date,obj.path_im,obj.path_calib);
                 
@@ -102,9 +112,9 @@ classdef telemetry < handle
             
             %2\ Get AO control loop data
             D              = 9.98;
-            volt2meter   = 0.5e-6;%4095e-6;
+            volt2meter   = 0.5e-6;%0.4095e-6;
             obj.slopes   = double(trs.A.OFFSETCENTROID);
-                        
+            
             if ismatrix(obj.slopes)
                 obj.nSl     = size(obj.slopes,1);
                 obj.nExp    = size(obj.slopes,2);
@@ -123,10 +133,10 @@ classdef telemetry < handle
             MC           = mean(MC,3);
             obj.R        = volt2meter*MC(:,1:obj.nCom)';
             obj.Rtt      = volt2meter*MC(:,obj.nCom+1:obj.nCom+2)';
-            obj.focus    = 2.6*flipud(double(trs.A.RESIDUALWAVEFRONT(end,:)));
+            obj.focus    = flipud(double(trs.A.RESIDUALWAVEFRONT(end,:)));
             
             if ~isfield(trs,'B')
-                obj.tipTilt  = 2.6*flipud(double(trs.A.RESIDUALWAVEFRONT(obj.nCom+1:obj.nCom+2,:)));
+                obj.tipTilt  = 2.6*flipud(double(trs.A.RESIDUALWAVEFRONT(obj.nCom+1:obj.nCom+2,:))); %angle un arcsec
                 obj.ittm_pos = double(trs.A.TTCOMMANDS);
             else
                 obj.tipTilt  = 0.26*flipud(double(trs.B.DTTCENTROIDS));
@@ -138,7 +148,7 @@ classdef telemetry < handle
             obj.waveFront = bsxfun(@minus,obj.waveFront,mean(obj.waveFront,2));
             
             obj.ittm_pos= D*tan(constants.arcsec2radian*obj.ittm_pos);
-            obj.ittm_pos= bsxfun(@minus,obj.ittm_pos,mean(obj.ittm_pos,2));            
+            obj.ittm_pos= bsxfun(@minus,obj.ittm_pos,mean(obj.ittm_pos,2));
             obj.tipTilt = D*tan(constants.arcsec2radian*obj.tipTilt);
             obj.tipTilt = bsxfun(@minus,obj.tipTilt,mean(obj.tipTilt,2));
             
@@ -185,48 +195,59 @@ classdef telemetry < handle
             obj.ttloop_gain = double(trs.DT_SERVO(1));
             obj.ttloop_lat  = 1.65e-3; %Vand Dam SPIE 2004
             
-            %5.2 Rejection transfer function
-            % Integrator tf
-            ho_num  = (double(trs.DM_SERVO(1:4))');
-            ho_den  = [1 (double(trs.DM_SERVO(5:end))')];
-            h_servo = tf(ho_num,ho_den,1/obj.holoop_freq);
+            %5.2 Rejection transfer functions
             
-            % Lag tf
-            delay  = obj.holoop_lat*obj.holoop_freq;
-            delta  = (delay - floor(delay));
-            if delay > 1
-                h_lag = tf('z',1/obj.holoop_freq)^(-1) + delta*tf('z',1/obj.holoop_freq)^(-2);
-            else
-                h_lag = 1 + delta*tf('z',1/obj.holoop_freq)^(-1);
-            end
+            %5.2.1. HO LOOP
+            % wfs TF
             obj.nExp = size(obj.slopes,2);
             floc           = logspace(-3,log10(0.5*obj.holoop_freq),obj.nExp/2);
-            obj.holoop_rtf = squeeze(bode(1/(1+h_servo*h_lag),2*pi*floc))';
-            
-            %Noise transfer function
-            obj.holoop_ntf = squeeze(bode(h_servo*h_lag/(1+h_servo*h_lag),2*pi*floc));
+            obj.holoop_wfs    = sinc(floc/obj.holoop_freq).*exp(-1i*floc/obj.holoop_freq);
+            % Lag tf
+            delay  = obj.holoop_lat*obj.holoop_freq;
+            obj.holoop_lag = exp(-2i*floc*delay*1e-3);
+            % servo tf
+            s = 2i*pi*floc;
+            z = exp(-s/obj.holoop_freq);
+            num_coefs  = (double(trs.DM_SERVO(1:4))');
+            den_coefs  = (double(trs.DM_SERVO(5:end))');
+            ho_num = num_coefs(1) + num_coefs(2)*z + num_coefs(3)*z.^2 + num_coefs(4)*z.^3;
+            ho_den = 1+ den_coefs(1)*z + den_coefs(2)*z.^2 + den_coefs(3)*z.^3;
+            obj.holoop_servo = ho_num./ho_den;
+            % open loop tf
+            obj.holoop_ol = obj.holoop_wfs.*obj.holoop_servo.*obj.holoop_lag;
+            %closed loop tf
+            obj.holoop_ctf = obj.holoop_ol./(1+ obj.holoop_ol);
+            % rejection tf
+            obj.holoop_rtf =1 - obj.ttloop_ctf;
+            %noise transfer function
+            obj.holoop_ntf = squeeze(obj.holoop_servo./(1+obj.holoop_ol));
             obj.holoop_pn  = (trapz(floc,abs(obj.holoop_ntf).^2)*2/obj.holoop_freq);
-                        
-            % TT Integrator tf
-            tt_num  = (double(trs.DT_SERVO(1:4))');
-            tt_den  = [1 (double(trs.DT_SERVO(5:end))')];
-            ht_servo = tf(tt_num,tt_den,1/obj.ttloop_freq);
             
-            % TT Lag tf
-            delay  = obj.ttloop_lat*obj.ttloop_freq;
-            delta  = (delay - floor(delay));
-            if delay > 1
-                ht_lag = tf('z',1/obj.ttloop_freq)^(-1) + delta*tf('z',1/obj.ttloop_freq)^(-2);
-            else
-                ht_lag = 1 + delta*tf('z',1/obj.ttloop_freq)^(-1);
-            end
+            %5.2.2. TT LOOP            
+            % wfs TF
             nF = size(obj.tipTilt,2);
             floc           = logspace(-3,log10(0.5*obj.ttloop_freq),nF/2);
-            obj.ttloop_rtf = squeeze(bode(1/(1+ht_servo*ht_lag),2*pi*floc))';
-            %Noise transfer function
-            obj.ttloop_ntf = squeeze(bode(ht_servo*ht_lag/(1+ht_servo*ht_lag),2*pi*floc));
-            obj.ttloop_pn  = (trapz(floc,abs(obj.ttloop_ntf).^2)*2/obj.ttloop_freq);
-            
+            obj.ttloop_wfs    = sinc(floc/obj.ttloop_freq).*exp(-1i*floc/obj.ttloop_freq);
+            % TT Lag tf
+            delay  = obj.ttloop_lat*obj.ttloop_freq;
+            obj.ttloop_lag = exp(-2i*floc*delay*1e-3);
+            % TT servo tf
+            s = 2i*pi*floc;
+            z = exp(-s/obj.ttloop_freq);
+            num_coefs  = (double(trs.DT_SERVO(1:4))');
+            den_coefs  = (double(trs.DT_SERVO(5:end))');
+            ho_num = num_coefs(1) + num_coefs(2)*z + num_coefs(3)*z.^2 + num_coefs(4)*z.^3;
+            ho_den = 1+ den_coefs(1)*z + den_coefs(2)*z.^2 + den_coefs(3)*z.^3;
+            obj.ttloop_servo = ho_num./ho_den;
+            % open loop tf
+            obj.ttloop_ol = obj.ttloop_wfs.*obj.ttloop_servo.*obj.ttloop_lag;
+            %closed loop tf
+            obj.ttloop_ctf =obj.ttloop_ol./(1+obj.ttloop_ol);
+            % rejection tf
+            obj.ttloop_rtf =1 - obj.ttloop_ctf;
+            %noise transfer function
+            obj.ttloop_ntf = squeeze(obj.ttloop_servo./(1+obj.ttloop_ol));
+            obj.ttloop_pn  = (trapz(floc,abs(obj.ttloop_ntf).^2)*2/obj.ttloop_freq);                                  
         end
         
         function obj = restoreNIRC2Image(obj,date,path_im,path_calib)
@@ -352,20 +373,20 @@ classdef telemetry < handle
             %5.2 Influence DM functions in opd/volt
             obj.dmIF = obj.aoSys.dm.modes.modes;
             
-%             if size(obj.dmIF,1)~=obj.dk^2
-%                 fprintf('\nInterpolate the influence functions...');
-%                 tmp  = zeros(obj.dk,obj.dk,obj.nCom);
-%                 nPh  = sqrt(size(obj.dmIF,1));
-%                 if2d = reshape(full(obj.dmIF),nPh,nPh,[]);
-%                 for i=1:obj.nCom
-%                     tmp(:,:,i) = tools.interpolate(if2d(:,:,i),obj.dk);
-%                 end
-%                 obj.dmIF = tmp/max(tmp(:));
-%                 obj.dmIF = reshape(obj.dmIF,obj.dk*obj.dk,obj.nCom);
-%             end
-%             
-%             obj.dmIF_inv = pinv(full(obj.dmIF));
-%             obj.Hdm      = obj.dmIF*obj.dmIF_inv;
+            %             if size(obj.dmIF,1)~=obj.dk^2
+            %                 fprintf('\nInterpolate the influence functions...');
+            %                 tmp  = zeros(obj.dk,obj.dk,obj.nCom);
+            %                 nPh  = sqrt(size(obj.dmIF,1));
+            %                 if2d = reshape(full(obj.dmIF),nPh,nPh,[]);
+            %                 for i=1:obj.nCom
+            %                     tmp(:,:,i) = tools.interpolate(if2d(:,:,i),obj.dk);
+            %                 end
+            %                 obj.dmIF = tmp/max(tmp(:));
+            %                 obj.dmIF = reshape(obj.dmIF,obj.dk*obj.dk,obj.nCom);
+            %             end
+            %
+            %             obj.dmIF_inv = pinv(full(obj.dmIF));
+            %             obj.Hdm      = obj.dmIF*obj.dmIF_inv;
             
             %6\ Loop status
             %6.1. HO loop

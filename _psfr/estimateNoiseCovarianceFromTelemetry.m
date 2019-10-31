@@ -26,38 +26,19 @@ inputs.parse(trs,varargin{:});
 method = inputs.Results.method;
 
 %1\ HO WFS noise covariance matrix
-if strcmp(method,'rtf')
-	wvf = trs.waveFront;
-else
-	u = trs.hodm_pos;
-	w = trs.waveFront;
-	dt = trs.holoop_lat*trs.holoop_freq;
-	dt = mod(dt,2);
-	wvf = (w + (dt.*circshift(u,-3,2) + (1-dt).*circshift(u,-2,2)));% To be reviewed
-    wvf = u;
-end
-
-Cn = getNoiseCovariance(wvf,'method',method,'rtf',trs.holoop_rtf);
-var_n = trace(Cn)/size(Cn,1);
+Cn = getNoiseCovariance(trs.hodm_pos,'method',method,'rtf',trs.holoop_ctf./trs.holoop_wfs,'FSAMP',trs.holoop_freq);
+validInput = std(trs.hodm_pos,[],2)~=0;
+var_n = trace(Cn(validInput,validInput))/nnz(validInput);
 
 %2\ TT WFS noise covariance matrix
-if strcmp(method,'rtf')
-	wvftt = trs.tipTilt;
-else
-	utt = trs.ittm_pos;
-	wtt = trs.tipTilt;
-	dt = trs.ttloop_lat*trs.ttloop_freq;
-	dt = mod(dt,2);
-	wvftt = (wtt + (dt.*circshift(utt,-3,2) + (1-dt).*circshift(utt,-2,2)) ); % To be reviewed
-    wvftt = utt;
-end
-Cn_tt = getNoiseCovariance(wvftt,'method',method,'rtf',trs.ttloop_rtf);
+Cn_tt = getNoiseCovariance(trs.ittm_pos,'method',method,'rtf',trs.ttloop_ctf./trs.ttloop_wfs,'FSAMP',trs.ttloop_freq);
 var_n_tt = trace(Cn_tt);
 
 
 function Cnn = getNoiseCovariance(s,varargin)
 inputs = inputParser;
 inputs.addRequired('s',@isnumeric);
+inputs.addParameter('FSAMP',1e3,@isnumeric);
 inputs.addParameter('method','autocorrelation',@ischar);
 inputs.addParameter('nfit',1,@isnumeric);
 inputs.addParameter('nshift',1,@isnumeric);
@@ -72,6 +53,7 @@ rtf = inputs.Results.rtf;
 %1\ Mean removal
 s       = squeeze(s);
 s       = bsxfun(@minus,s,mean(s,2));
+validInput = std(s,[],2)~=0;
 [nS,nF] = size(s);
 Cnn     = zeros(nS);
 
@@ -96,17 +78,24 @@ elseif strcmp(method,'autocorrelation') % Deriving the temporal cross-correlatio
     ds_n  = s - circshift(s,[0,-nshift]);
     ds_p  = s - circshift(s,[0,nshift]);
     Cnn = 0.5*(s*ds_n' + s*ds_p')/nF;             
+\    
 elseif strcmp(method,'rtf') % Adjusting the noise level through the noise rejection transfer function model
-    fftS = fft(s,[],2)/nF;
-    fftS = fftS(:,1:floor(end/2))./RTF;
+    fftS = fft(s,[],2); % we verified that std(s(k,:))^2 = sum(abs(fftS(k,:)).^2): Parseval
+    fftS = fftS(:,1:floor(end/2))./rtf;
+    % truncate to keep high-spatial frequencies only
+    sub_dim = floor(9*nF/2/10);
+    fftS = fftS(:,sub_dim:end);
     cfftS= conj(fftS);
-    nn = round(nF/10);
-    
-    for i=1:nS
-        % Get the cross PSD
-        crossPSD  = abs(bsxfun(@times,fftS(i,:),cfftS(i:end,:)));
-        % Estimate the noise plateau
-        Cnn(i,i:end)  = mean(crossPSD(:,end-nn:end),2);
+       
+    for i=1:nS 
+        if validInput(i)
+            % Get the cross PSD
+            crossPSD  = bsxfun(@times,fftS(i,:),cfftS(i:end,:));
+            % Estimate the noise plateau
+            Cnn(i,i:end)  = median(real(crossPSD),2);
+        end
     end
-    Cnn = transpose(Cnn) + Cnn - diag(diag(Cnn));
+    Cnn = transpose(Cnn) + Cnn - diag(diag(Cnn));    
+    % Normalization
+    Cnn = Cnn/nF;
 end
