@@ -218,7 +218,7 @@ classdef telemetry < handle
             %closed loop tf
             obj.holoop_ctf = obj.holoop_ol./(1+ obj.holoop_ol);
             % rejection tf
-            obj.holoop_rtf =1 - obj.ttloop_ctf;
+            obj.holoop_rtf =1 - obj.holoop_ctf;
             %noise transfer function
             obj.holoop_ntf = squeeze(obj.holoop_servo./(1+obj.holoop_ol));
             obj.holoop_pn  = (trapz(floc,abs(obj.holoop_ntf).^2)*2/obj.holoop_freq);

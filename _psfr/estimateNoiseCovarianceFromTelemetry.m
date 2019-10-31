@@ -78,7 +78,7 @@ elseif strcmp(method,'autocorrelation') % Deriving the temporal cross-correlatio
     ds_n  = s - circshift(s,[0,-nshift]);
     ds_p  = s - circshift(s,[0,nshift]);
     Cnn = 0.5*(s*ds_n' + s*ds_p')/nF;             
-\    
+    
 elseif strcmp(method,'rtf') % Adjusting the noise level through the noise rejection transfer function model
     fftS = fft(s,[],2); % we verified that std(s(k,:))^2 = sum(abs(fftS(k,:)).^2): Parseval
     fftS = fftS(:,1:floor(end/2))./rtf;
